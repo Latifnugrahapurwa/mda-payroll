@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+.env
+.env.local
+.vercel
+*.log
+.DS_Store
+
+*.tsbuildinfo
+.env.*
+!.env.example
+backups/
+Master_Karyawan_MDA_*.json
+Backup_Payroll_MDA_*.json
+Rekap_Penggajian_MDA_*.csv
