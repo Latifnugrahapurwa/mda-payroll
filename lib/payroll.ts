@@ -50,12 +50,6 @@ export function currentPeriod(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export function escapeCsv(value: unknown): string {
-  const raw = String(value ?? "");
-  const text = typeof value === "string" && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
 export function safeFilePart(value: string): string {
   return value.normalize("NFKD").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Karyawan";
 }

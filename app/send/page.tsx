@@ -2,26 +2,26 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
-import { Copy, Download, FileDown, FileUp, Send, Users, CheckCircle2, Clock3, Wallet } from "lucide-react";
+import { Copy, Send, Users, CheckCircle2, Clock3, Wallet } from "lucide-react";
 import { SlipCard } from "@/components/SlipCard";
 import { Toast, type ToastKind } from "@/components/Toast";
 import { usePayrollStore } from "@/lib/storage";
-import { currentPeriod, escapeCsv, formatMoney, formatNumber, formatPeriod, isPayrollRecord, safeFilePart } from "@/lib/payroll";
-import { downloadText } from "@/lib/download";
+import { currentPeriod, formatMoney, formatNumber, formatPeriod, safeFilePart } from "@/lib/payroll";
 import type { PayrollRecord } from "@/lib/types";
+import { WorkbookTransfer } from "@/components/WorkbookTransfer";
+import type { ImportMode, PayrollWorkbookData } from "@/lib/xlsx-backup";
 
 type SendStatus = "Draft" | "Siap Kirim" | "Mengirim..." | "Terkirim" | "Gagal" | "Belum Linked";
 type Notice = { message: string; kind: ToastKind };
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export default function SendPage() {
-  const { state, replacePeriodPayrolls, markExported } = usePayrollStore();
+  const { state, replacePeriodPayrolls, markExported, importMaster } = usePayrollStore();
   const [period, setPeriod] = useState(currentPeriod());
   const [statuses, setStatuses] = useState<Record<string, SendStatus>>({});
   const [progress, setProgress] = useState({ done: 0, total: 0, running: false });
   const [notice, setNotice] = useState<Notice | null>(null);
   const slipRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const restoreRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => [...state.employees].sort((a, b) => a.name.localeCompare(b.name)).map((employee) => ({ employee, record: state.payrolls.find((payroll) => payroll.period === period && payroll.employeeId === employee.id) ?? null })), [state.employees, state.payrolls, period]);
   const records = rows.flatMap((row) => row.record ? [row.record] : []);
@@ -98,35 +98,13 @@ export default function SendPage() {
     notify(`Batch selesai: ${success} dari ${queue.length} slip berhasil dikirim.`, success === queue.length ? "success" : "info");
   }
 
-  function backupPeriod() {
-    const payload = { schemaVersion: 1, period, exportedAt: new Date().toISOString(), records };
-    downloadText(`Backup_Payroll_MDA_${period}.json`, JSON.stringify(payload, null, 2));
-    markExported(period);
-    notify(`Backup ${formatPeriod(period)} berhasil dibuat.`);
-  }
-
-  async function restoreBackup(file?: File) {
-    if (!file) return;
-    try {
-      const payload = JSON.parse(await file.text()) as { period?: string; records?: unknown[] };
-      if (!payload.period || !/^\d{4}-\d{2}$/.test(payload.period) || !Array.isArray(payload.records) || payload.records.some((record) => !isPayrollRecord(record) || record.period !== payload.period)) {
-        throw new Error("Format arsip bulanan tidak valid.");
-      }
-      replacePeriodPayrolls(payload.period, payload.records as PayrollRecord[]);
-      setPeriod(payload.period);
-      setStatuses({});
-      notify(`Restore ${payload.records.length} slip untuk ${formatPeriod(payload.period)} berhasil.`);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Gagal restore arsip.", "error");
-    }
-    if (restoreRef.current) restoreRef.current.value = "";
-  }
-
-  function exportCsv() {
-    const headers = ["EIC", "Name", "Position", "Attend", "Work Hours", "AFK Hours", "Total Paid Hours", "Salary/Hour", "Based Payout", "Transport", "Meal", "Bonus", "Sub Total", "Loan", "MDA Fees", "Total To Be Paid", "Bank", "No. Rekening BNI"];
-    const data = records.map((record) => [record.employeeSnapshot.eic, record.employeeSnapshot.name, record.employeeSnapshot.position, record.attend, record.workHours, record.afkHours, record.totalPaidHours, record.salaryPerHour, record.basedPayoutAmount, record.transportAllowance, record.mealAllowance, record.bonus, record.subTotal, record.loanInstallment, record.mdaFees, record.totalToBePaid, record.employeeSnapshot.bankName, record.employeeSnapshot.bankAccountNumber]);
-    downloadText(`Rekap_Penggajian_MDA_${period}.csv`, `\uFEFF${[headers, ...data].map((row) => row.map(escapeCsv).join(",")).join("\r\n")}`, "text/csv");
-    notify("Laporan CSV berhasil diekspor.");
+  function importWorkbook(data: PayrollWorkbookData, mode: ImportMode, importedRecords: PayrollWorkbookData["records"]) {
+    importMaster(data.employees, data.settings, mode === "replace");
+    replacePeriodPayrolls(data.period, importedRecords);
+    markExported(data.period);
+    setPeriod(data.period);
+    setStatuses({});
+    setProgress({ done: 0, total: 0, running: false });
   }
 
   async function copyAccount(account: string) {
@@ -170,12 +148,15 @@ export default function SendPage() {
         <p className="mt-4 text-[13px] text-slate-400">Browser harus tetap terbuka selama batch berlangsung. Slip dikirim sebagai dokumen PNG agar kualitas tetap tajam.</p>
       </section>
 
-      <div className="flex flex-wrap gap-3">
-        <button onClick={backupPeriod} className="inline-flex min-h-[48px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-[14px] font-bold text-slate-700 transition hover:bg-slate-50"><Download size={18} /> Backup Bulan Ini (.json)</button>
-        <button onClick={() => restoreRef.current?.click()} className="inline-flex min-h-[48px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-[14px] font-bold text-slate-700 transition hover:bg-slate-50"><FileUp size={18} /> Restore Arsip (.json)</button>
-        <button onClick={exportCsv} className="inline-flex min-h-[48px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-[14px] font-bold text-slate-700 transition hover:bg-slate-50"><FileDown size={18} /> Export Rekap (.csv)</button>
-        <input ref={restoreRef} type="file" accept=".json,application/json" onChange={(event) => void restoreBackup(event.target.files?.[0])} className="hidden" />
-      </div>
+      <WorkbookTransfer
+        period={period}
+        employees={state.employees}
+        settings={state.settings}
+        records={records}
+        onImport={importWorkbook}
+        onExported={() => markExported(period)}
+        onNotice={notify}
+      />
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
         <div className="flex flex-col justify-between gap-3 border-b border-slate-100 p-6 sm:flex-row sm:items-center"><div><h2 className="text-[20px] font-extrabold text-slate-950">Rekap Karyawan & Status Pengiriman</h2><p className="mt-1 text-[14px] text-slate-600">Nomor rekening ditampilkan hanya untuk keperluan transfer bendahara.</p></div><div className="flex items-center gap-2 text-[13px] font-semibold text-slate-500"><Wallet size={19} /> {records.length} slip untuk periode ini</div></div>

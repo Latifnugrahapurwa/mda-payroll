@@ -1,16 +1,16 @@
 # Melanesia Digital Advertisement — Payroll Management System
 
-Aplikasi manajemen penggajian berbasis **Next.js App Router, TypeScript, dan Tailwind CSS**. Seluruh master karyawan, pengaturan, serta arsip slip disimpan di `localStorage` browser bendahara. Tidak membutuhkan database eksternal.
+Aplikasi manajemen penggajian berbasis **Next.js App Router, TypeScript, dan Tailwind CSS**. Seluruh master karyawan, pengaturan, serta arsip slip disimpan di `localStorage` browser bendahara. Tidak membutuhkan database eksternal. Backup dan pemindahan data menggunakan satu workbook Excel `.xlsx` yang dapat diekspor dan diimpor kembali.
 
 ## Fitur
 
 - Master karyawan: tambah, edit, hapus, cari, rekening internal, dan Telegram Chat ID.
 - Global settings: standard monthly hours, basis tunjangan transport/makan, dan MDA fees. Token Telegram hanya berada di environment server.
 - Payroll: input per periode dan karyawan, kalkulasi real-time, live preview slip portrait dengan tinggi otomatis agar seluruh isi tidak terpotong.
-- Ekspor slip PNG resolusi tinggi dan PDF A4 dengan skala proporsional; ekspor rekap CSV; backup/restore JSON per periode.
+- Ekspor dan impor satu workbook Excel `.xlsx` dengan sheet Petunjuk, Ringkasan Bulanan, Master Karyawan, Pengaturan Global, Rekap Penggajian, Detail Kehadiran, dan Detail Pembayaran.
 - Form angka memakai input teks numerik tanpa spinner, sehingga scroll halaman tidak mengubah nilai.
 - Notifikasi aksi penting tampil sebagai toast kontras di atas halaman; tombol simpan tidak menutupi form.
-- Ekspor/impor master karyawan dengan mode merge berdasarkan EIC/nama atau replace.
+- Import workbook dengan mode gabungkan/perbarui berdasarkan EIC/nama atau timpa seluruh master; payroll pada periode file diganti sementara periode lain dipertahankan.
 - Indikator backup berdasarkan waktu perubahan arsip.
 - Pengiriman slip PNG sebagai dokumen Telegram secara individual atau batch berurutan (jeda 400 ms).
 - Webhook Telegram untuk membalas pesan `/start` maupun teks biasa dengan Chat ID.
@@ -169,6 +169,21 @@ mda-payroll/
 └── tsconfig.json
 ```
 
+## Backup dan restore workbook Excel
+
+Pada halaman Karyawan, Penggajian, dan Kirim & Rekap tersedia tombol **Export Excel (.xlsx)** dan **Import dari Excel (.xlsx)**. File yang sama memuat:
+
+- `Petunjuk`: versi format, periode, waktu ekspor, dan aturan pemulihan.
+- `Ringkasan Bulanan`: jumlah karyawan, slip, jam dibayar, subtotal, potongan, biaya MDA, dan total transfer.
+- `Master Karyawan`: identitas, jabatan, tarif, rekening internal, dan Telegram Chat ID.
+- `Pengaturan Global`: jam standar, basis tunjangan transport/makan, dan persentase biaya MDA.
+- `Rekap Penggajian`: seluruh komponen input dan hasil kalkulasi setiap slip pada periode terpilih.
+- `Detail Kehadiran` dan `Detail Pembayaran`: tampilan terpisah untuk pemeriksaan yang lebih mudah.
+
+Gunakan file ekspor asli untuk import. Jangan mengubah nama sheet atau header kolom. Untuk perubahan data, edit sheet `Master Karyawan`, `Pengaturan Global`, atau `Rekap Penggajian`; sheet ringkasan dan detail adalah tampilan laporan. Import dapat menggabungkan master berdasarkan EIC/nama atau menimpa seluruh master. Dalam kedua mode, pengaturan global diperbarui dan arsip payroll untuk periode yang tertulis di workbook diganti; arsip periode lain tetap dipertahankan. Nilai hasil kalkulasi payroll dihitung ulang dari komponen input dan pengaturan global di workbook agar angka total tidak tertinggal jika sel input diedit. Import menampilkan konfirmasi sebelum mengubah data.
+
+Workbook dapat berisi nomor rekening dan Telegram Chat ID. Simpan file di lokasi privat dan jangan unggah ke repository GitHub Public.
+
 ## Rumus penggajian
 
 ```text
@@ -185,11 +200,11 @@ Nilai tunjangan transport, makan, dan MDA Fees dapat di-override per slip. Gunak
 
 ## Catatan penting tentang penyimpanan dan keamanan
 
-1. `localStorage` hanya tersedia pada browser dan origin yang sama. Data **tidak otomatis tersinkron** ke browser/perangkat lain, dan menghapus data situs/browser dapat menghapus arsip. Lakukan backup JSON secara rutin dan simpan salinannya di lokasi aman.
+1. `localStorage` hanya tersedia pada browser dan origin yang sama. Data **tidak otomatis tersinkron** ke browser/perangkat lain, dan menghapus data situs/browser dapat menghapus arsip. Lakukan ekspor workbook Excel secara rutin dan simpan salinannya di lokasi aman.
 2. Aplikasi tidak mengirim data master atau arsip ke database server. Pengiriman slip hanya mengirim file slip, Chat ID, nama, periode, dan bila dipakai token bot ke API route.
 3. Token Telegram hanya dibaca dari `TELEGRAM_BOT_TOKEN` di server Vercel. Jangan pernah menaruh token di localStorage, source code, atau repository.
 4. Slip PNG dibatasi maksimal 4 MB sebelum dikirim agar sesuai batas request body yang aman untuk Vercel Functions. Batch berjalan di browser; jangan tutup tab sampai selesai.
-5. Nomor rekening hanya ditampilkan di tabel master dan rekap transfer/CSV. Komponen slip tidak memuat nomor rekening.
+5. Nomor rekening hanya ditampilkan di master dan workbook internal bendahara. Komponen slip tidak memuat nomor rekening.
 6. Login ini hanya satu password bendahara, belum menyediakan multi-user, role access, audit log server, atau enkripsi arsip lokal. Karena repository public, jangan commit file backup, data karyawan, atau slip gaji.
 
 ## Verifikasi sebelum digunakan

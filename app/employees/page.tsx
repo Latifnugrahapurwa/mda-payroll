@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { Copy, Download, FileUp, Pencil, Plus, Search, Trash2, X } from "lucide-react";
-import { Field, NumberInput, SelectInput, TextInput } from "@/components/Field";
+import { useMemo, useState } from "react";
+import { Copy, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Field, NumberInput, TextInput } from "@/components/Field";
 import { Toast, type ToastKind } from "@/components/Toast";
 import { usePayrollStore } from "@/lib/storage";
-import { downloadText } from "@/lib/download";
-import type { Employee, GlobalSettings } from "@/lib/types";
+import type { Employee } from "@/lib/types";
+import { currentPeriod } from "@/lib/payroll";
+import { WorkbookTransfer } from "@/components/WorkbookTransfer";
+import type { ImportMode, PayrollWorkbookData } from "@/lib/xlsx-backup";
 
 const blankEmployee = (): Employee => ({
   id: crypto.randomUUID(), eic: "", name: "", position: "", salaryPerHour: 0,
@@ -16,15 +18,12 @@ const blankEmployee = (): Employee => ({
 type Notice = { message: string; kind: ToastKind };
 
 export default function EmployeesPage() {
-  const { state, setEmployees, importMaster } = usePayrollStore();
+  const { state, setEmployees, importMaster, replacePeriodPayrolls, markExported } = usePayrollStore();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Employee | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [importMode, setImportMode] = useState<"merge" | "replace">("merge");
-  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const importRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(
     () => state.employees.filter((employee) => `${employee.eic} ${employee.name} ${employee.position}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)),
@@ -54,27 +53,10 @@ export default function EmployeesPage() {
     setNotice({ message: "Data karyawan berhasil disimpan.", kind: "success" });
   }
 
-  function exportMaster() {
-    const payload = { schemaVersion: 1, exportedAt: new Date().toISOString(), employees: state.employees, globalRateSettings: state.settings };
-    const date = new Date().toISOString().slice(0, 10);
-    downloadText(`Master_Karyawan_MDA_${date}.json`, JSON.stringify(payload, null, 2));
-    setNotice({ message: "Master karyawan berhasil diekspor. Token Telegram tidak disertakan demi keamanan.", kind: "success" });
-  }
-
-  async function importFile(file: File) {
-    try {
-      const parsed = JSON.parse(await file.text()) as { employees?: Employee[]; globalRateSettings?: Partial<GlobalSettings>; settings?: Partial<GlobalSettings> };
-      if (!Array.isArray(parsed.employees) || parsed.employees.some((employee) => !employee.id || !employee.name || typeof employee.salaryPerHour !== "number")) {
-        throw new Error("Struktur file master tidak valid. Pastikan file berasal dari ekspor MDA Payroll.");
-      }
-      importMaster(parsed.employees, parsed.globalRateSettings ?? parsed.settings, importMode === "replace");
-      setNotice({ message: `Import selesai: ${parsed.employees.length} data karyawan berhasil diproses.`, kind: "success" });
-    } catch (error) {
-      setNotice({ message: error instanceof Error ? error.message : "Gagal membaca file JSON.", kind: "error" });
-    } finally {
-      if (importRef.current) importRef.current.value = "";
-      setPendingImportFile(null);
-    }
+  function importWorkbook(data: PayrollWorkbookData, mode: ImportMode, records: PayrollWorkbookData["records"]) {
+    importMaster(data.employees, data.settings, mode === "replace");
+    replacePeriodPayrolls(data.period, records);
+    markExported(data.period);
   }
 
   async function copyAccount(account: string) {
@@ -149,19 +131,16 @@ export default function EmployeesPage() {
         </section>
 
         <section className="h-fit rounded-2xl border border-slate-200 bg-white p-6 shadow-soft">
-          <div className="flex items-center gap-3"><div className="rounded-xl bg-slate-100 p-3 text-slate-700"><Download size={22} /></div><div><h2 className="text-[18px] font-extrabold text-slate-950">Backup Master Data</h2><p className="text-[13px] text-slate-500">Ekspor dan pindahkan data.</p></div></div>
-          <p className="mt-4 text-[14px] leading-relaxed text-slate-600">Pindahkan master karyawan dan aturan tarif ke perangkat bendahara lain.</p>
-          <button onClick={exportMaster} className="mt-5 flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-3 text-[14px] font-extrabold text-slate-800 transition hover:bg-slate-50"><Download size={18} /> Export Master (.json)</button>
-          <div className="mt-6 border-t border-slate-100 pt-5">
-            <Field label="Mode import">
-              <SelectInput value={importMode} onChange={(event) => setImportMode(event.target.value as "merge" | "replace")}>
-                <option value="merge">Gabungkan / Perbarui (EIC / Nama)</option><option value="replace">Timpa Semua (Replace)</option>
-              </SelectInput>
-            </Field>
-            <input type="file" ref={importRef} accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; if (importMode === "replace") setPendingImportFile(file); else void importFile(file); }} className="hidden" />
-            <button onClick={() => importRef.current?.click()} className="mt-4 flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-[14px] font-extrabold text-white transition hover:bg-slate-800"><FileUp size={18} /> Import Master (.json)</button>
-            <p className="mt-3 text-[13px] leading-relaxed text-slate-500">Token Telegram tidak ikut diekspor. Setelah import, periksa kembali tarif dan rekening.</p>
-          </div>
+          <WorkbookTransfer
+            compact
+            period={currentPeriod()}
+            employees={state.employees}
+            settings={state.settings}
+            records={state.payrolls.filter((record) => record.period === currentPeriod())}
+            onImport={importWorkbook}
+            onExported={() => markExported(currentPeriod())}
+            onNotice={(message, kind = "success") => setNotice({ message, kind })}
+          />
         </section>
       </div>
 
@@ -195,15 +174,6 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {pendingImportFile && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div role="alertdialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-7 shadow-2xl">
-            <h2 className="text-[21px] font-black text-slate-950">Timpa seluruh master?</h2>
-            <p className="mt-2 text-[15px] leading-relaxed text-slate-600">Semua data karyawan saat ini akan diganti dengan isi file <b>{pendingImportFile.name}</b>. Tindakan ini tidak dapat dibatalkan.</p>
-            <div className="mt-7 flex justify-end gap-3"><button onClick={() => { setPendingImportFile(null); if (importRef.current) importRef.current.value = ""; }} className="min-h-[48px] rounded-xl border border-slate-300 px-5 text-[14px] font-bold text-slate-700">Batal</button><button onClick={() => void importFile(pendingImportFile)} className="min-h-[48px] rounded-xl bg-rose-600 px-5 text-[14px] font-extrabold text-white hover:bg-rose-700">Timpa Master</button></div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
