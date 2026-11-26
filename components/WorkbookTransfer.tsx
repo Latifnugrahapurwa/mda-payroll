@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Download, FileSpreadsheet, FileUp, LoaderCircle } from "lucide-react";
-import type { Employee, GlobalSettings, PayrollRecord } from "@/lib/types";
+import type { Employee, GlobalSettings, PaymentRule, PayrollRecord } from "@/lib/types";
 import { exportPayrollWorkbook, importPayrollWorkbook, remapImportedPayrollRecords, type ImportMode, type PayrollWorkbookData } from "@/lib/xlsx-backup";
 import type { ToastKind } from "@/components/Toast";
 
@@ -10,6 +10,7 @@ export function WorkbookTransfer({
   period,
   employees,
   settings,
+  paymentRules,
   records,
   onImport,
   onExported,
@@ -19,6 +20,7 @@ export function WorkbookTransfer({
   period: string;
   employees: Employee[];
   settings: GlobalSettings;
+  paymentRules: PaymentRule[];
   records: PayrollRecord[];
   onImport: (data: PayrollWorkbookData, mode: ImportMode, mappedRecords: PayrollRecord[]) => void;
   onExported: () => void;
@@ -35,7 +37,7 @@ export function WorkbookTransfer({
     if (busy) return;
     setBusy("export");
     try {
-      await exportPayrollWorkbook({ period, employees, settings, records, exportedAt: new Date().toISOString() });
+      await exportPayrollWorkbook({ period, employees, settings, paymentRules, records, exportedAt: new Date().toISOString() });
       onExported();
       onNotice(`Workbook lengkap periode ${period} berhasil diekspor.`, "success");
     } catch (error) {
@@ -65,7 +67,7 @@ export function WorkbookTransfer({
     try {
       const mappedRecords = remapImportedPayrollRecords(pending.records, pending.employees, employees, mode);
       onImport(pending, mode, mappedRecords);
-      onNotice(`Import berhasil: ${pending.employees.length} master karyawan dan ${mappedRecords.length} slip periode ${pending.period} diproses.`, "success");
+      onNotice(`Import berhasil: ${pending.employees.length} karyawan, ${pending.paymentRules.length} Payment Rules, dan ${mappedRecords.length} slip periode ${pending.period} diproses.`, "success");
       setPending(null);
       setFileName("");
       if (inputRef.current) inputRef.current.value = "";
@@ -76,15 +78,15 @@ export function WorkbookTransfer({
 
   return (
     <div className={compact ? "space-y-4" : "flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:flex-wrap sm:items-end"}>
-      {compact && <div><h2 className="text-[18px] font-extrabold text-slate-950">Backup & Pemulihan Data</h2><p className="mt-1 text-[14px] leading-relaxed text-slate-600">Satu file Excel berisi master karyawan, pengaturan global, ringkasan, dan rincian payroll periode {period}.</p></div>}
-      {!compact && <div className="min-w-[220px] flex-1"><p className="text-[14px] font-extrabold text-slate-900">Workbook lengkap · {period}</p><p className="mt-1 text-[13px] text-slate-500">Master karyawan + pengaturan + rekap bulanan dalam satu file.</p></div>}
+      {compact && <div><h2 className="text-[18px] font-extrabold text-slate-950">Backup & Pemulihan Data</h2><p className="mt-1 text-[14px] leading-relaxed text-slate-600">Satu file Excel berisi master karyawan, profil Payment Rules, pengaturan, ringkasan, dan rincian payroll periode {period}.</p></div>}
+      {!compact && <div className="min-w-[220px] flex-1"><p className="text-[14px] font-extrabold text-slate-900">Workbook lengkap · {period}</p><p className="mt-1 text-[13px] text-slate-500">Master karyawan + Payment Rules + rekap bulanan dalam satu file.</p></div>}
       <div className={compact ? "grid gap-3" : "flex flex-wrap items-end gap-3"}>
         <button type="button" disabled={!!busy} onClick={() => void exportFile()} className={`inline-flex min-h-[50px] items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-[14px] font-extrabold text-slate-800 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 ${compact ? "w-full" : ""}`}>
           {busy === "export" ? <LoaderCircle className="animate-spin" size={18} /> : <FileSpreadsheet size={18} />}
           Export Excel (.xlsx)
         </button>
         <div className={compact ? "space-y-2" : "min-w-[230px]"}>
-          <label className="mb-1.5 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">Mode import master</label>
+          <label className="mb-1.5 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">Mode import master & rules</label>
           <select value={mode} onChange={(event) => setMode(event.target.value as ImportMode)} className="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-3 text-[14px] font-semibold text-slate-800 outline-none focus:border-slate-700 focus:ring-4 focus:ring-slate-100">
             <option value="merge">Gabungkan / Perbarui (EIC / Nama)</option>
             <option value="replace">Timpa Semua Master</option>
@@ -108,6 +110,7 @@ export function WorkbookTransfer({
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div className="rounded-xl bg-slate-50 p-4"><p className="text-[12px] font-semibold text-slate-500">Master karyawan</p><p className="mt-1 text-[25px] font-black tabular-nums text-slate-950">{pending.employees.length}</p></div>
               <div className="rounded-xl bg-slate-50 p-4"><p className="text-[12px] font-semibold text-slate-500">Slip payroll</p><p className="mt-1 text-[25px] font-black tabular-nums text-slate-950">{pending.records.length}</p></div>
+              <div className="rounded-xl bg-slate-50 p-4"><p className="text-[12px] font-semibold text-slate-500">Payment Rules</p><p className="mt-1 text-[25px] font-black tabular-nums text-slate-950">{pending.paymentRules.length}</p></div>
               <div className="col-span-2 rounded-xl bg-slate-50 p-4 sm:col-span-1"><p className="text-[12px] font-semibold text-slate-500">Periode arsip</p><p className="mt-1 text-[18px] font-black text-slate-950">{pending.period}</p></div>
             </div>
             <div className={`mt-5 rounded-xl border p-4 text-[14px] leading-relaxed ${mode === "replace" ? "border-rose-200 bg-rose-50 text-rose-900" : "border-sky-200 bg-sky-50 text-sky-900"}`}>

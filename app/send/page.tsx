@@ -99,7 +99,7 @@ export default function SendPage() {
   }
 
   function importWorkbook(data: PayrollWorkbookData, mode: ImportMode, importedRecords: PayrollWorkbookData["records"]) {
-    importMaster(data.employees, data.settings, mode === "replace");
+    importMaster(data.employees, data.settings, data.paymentRules, mode === "replace");
     replacePeriodPayrolls(data.period, importedRecords);
     markExported(data.period);
     setPeriod(data.period);
@@ -152,6 +152,7 @@ export default function SendPage() {
         period={period}
         employees={state.employees}
         settings={state.settings}
+        paymentRules={state.paymentRules}
         records={records}
         onImport={importWorkbook}
         onExported={() => markExported(period)}

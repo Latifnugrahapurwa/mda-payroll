@@ -180,7 +180,7 @@ Pada halaman Karyawan, Penggajian, dan Kirim & Rekap tersedia tombol **Export Ex
 - `Rekap Penggajian`: seluruh komponen input dan hasil kalkulasi setiap slip pada periode terpilih.
 - `Detail Kehadiran` dan `Detail Pembayaran`: tampilan terpisah untuk pemeriksaan yang lebih mudah.
 
-Gunakan file ekspor asli untuk import. Jangan mengubah nama sheet atau header kolom. Untuk perubahan data, edit sheet `Master Karyawan`, `Pengaturan Global`, atau `Rekap Penggajian`; sheet ringkasan dan detail adalah tampilan laporan. Import dapat menggabungkan master berdasarkan EIC/nama atau menimpa seluruh master. Dalam kedua mode, pengaturan global diperbarui dan arsip payroll untuk periode yang tertulis di workbook diganti; arsip periode lain tetap dipertahankan. Nilai hasil kalkulasi payroll dihitung ulang dari komponen input dan pengaturan global di workbook agar angka total tidak tertinggal jika sel input diedit. Import menampilkan konfirmasi sebelum mengubah data.
+Gunakan file ekspor asli untuk import. Jangan mengubah nama sheet atau header kolom. Untuk perubahan data, edit sheet `Master Karyawan`, `Pengaturan Global`, atau `Rekap Penggajian`; sheet ringkasan dan detail adalah tampilan laporan. Import dapat menggabungkan master berdasarkan EIC/nama atau menimpa seluruh master. Dalam kedua mode, pengaturan global dan profil Payment Rules diperbarui dan arsip payroll untuk periode yang tertulis di workbook diganti; arsip periode lain tetap dipertahankan. Nilai hasil kalkulasi payroll dihitung ulang dari komponen input dan pengaturan global dan profil Payment Rules di workbook agar angka total tidak tertinggal jika sel input diedit. Import menampilkan konfirmasi sebelum mengubah data.
 
 Workbook dapat berisi nomor rekening dan Telegram Chat ID. Simpan file di lokasi privat dan jangan unggah ke repository GitHub Public.
 
@@ -215,3 +215,13 @@ Nilai tunjangan transport, makan, dan MDA Fees dapat di-override per slip. Gunak
 - Backup dan restore periode uji.
 - Uji kirim Telegram ke akun sendiri sebelum menjalankan batch karyawan.
 - Simpan master dan backup bulanan di lokasi aman.
+
+
+## Dynamic Payment Rules dan AFK Calculator
+
+- Buat, ubah, duplikasi, dan hapus profil Payment Rules di Settings. Nama dan deskripsi profil bebas ditentukan bendahara.
+- Setiap profil menyimpan Standard Monthly Hours, basis tunjangan transport/makan, MDA Fees Percentage, serta default Work/Compensation/RST Hours.
+- Setiap karyawan dipasangkan ke satu profil pada form master karyawan. Profil yang masih dipakai karyawan tidak dapat dihapus.
+- Slip yang sudah disimpan membawa snapshot Payment Rules agar perubahan profil di masa depan tidak mengubah perhitungan historis. Nama profil tidak ditampilkan pada slip.
+- AFK Auto Calculation dapat diaktifkan per slip. Satu AFK Count setara 10 menit; 6 Count = 1 Hour. Saat diaktifkan, Count menjadi acuan awal, lalu perubahan pada salah satu kolom memperbarui kolom lainnya.
+- Workbook XLSX schema versi 2 menyimpan profil Payment Rules dan snapshot aturan pada setiap slip. Import schema versi 1 lama tetap didukung dengan membuat satu profil default dari Global Settings.

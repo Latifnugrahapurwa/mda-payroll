@@ -1,3 +1,16 @@
+export type PaymentRule = {
+  id: string;
+  name: string;
+  description: string;
+  standardMonthlyHours: number;
+  monthlyTransportAllowanceBase: number;
+  monthlyMealAllowanceBase: number;
+  mdaFeesPercentage: number;
+  defaultWorkHours: number;
+  defaultCompensationHours: number;
+  defaultRstHours: number;
+};
+
 export type Employee = {
   id: string;
   eic: string;
@@ -5,6 +18,7 @@ export type Employee = {
   position: string;
   salaryPerHour: number;
   positionalPayoutDefault: number;
+  paymentRuleId: string;
   bankName: string;
   bankAccountNumber: string;
   telegramChatId: string;
@@ -24,6 +38,7 @@ export type PayrollInput = {
   leavePermitted: number;
   afkCount: number;
   afkHours: number;
+  afkAutoEnabled: boolean;
   salaryPerHour: number;
   workHours: number;
   compensationHours: number;
@@ -54,6 +69,7 @@ export type PayrollRecord = PayrollInput & PayrollComputed & {
   id: string;
   employeeId: string;
   employeeSnapshot: EmployeeSnapshot;
+  paymentRuleSnapshot: PaymentRule;
   period: string;
   updatedAt: string;
 };
@@ -61,6 +77,7 @@ export type PayrollRecord = PayrollInput & PayrollComputed & {
 export type AppState = {
   employees: Employee[];
   settings: GlobalSettings;
+  paymentRules: PaymentRule[];
   payrolls: PayrollRecord[];
   lastExportedAt: Record<string, string>;
 };
@@ -72,6 +89,21 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
   mdaFeesPercentage: 5,
 };
 
+export function createDefaultPaymentRule(settings: GlobalSettings = DEFAULT_SETTINGS): PaymentRule {
+  return {
+    id: "default",
+    name: "Default Rules",
+    description: "Aturan pembayaran awal. Nama dan seluruh nilai dapat diubah.",
+    standardMonthlyHours: settings.standardMonthlyHours,
+    monthlyTransportAllowanceBase: settings.monthlyTransportAllowanceBase,
+    monthlyMealAllowanceBase: settings.monthlyMealAllowanceBase,
+    mdaFeesPercentage: settings.mdaFeesPercentage,
+    defaultWorkHours: 0,
+    defaultCompensationHours: 0,
+    defaultRstHours: 0,
+  };
+}
+
 export const EMPTY_PAYROLL_INPUT: PayrollInput = {
   attend: 0,
   sickLeave: 0,
@@ -79,6 +111,7 @@ export const EMPTY_PAYROLL_INPUT: PayrollInput = {
   leavePermitted: 0,
   afkCount: 0,
   afkHours: 0,
+  afkAutoEnabled: false,
   salaryPerHour: 0,
   workHours: 0,
   compensationHours: 0,

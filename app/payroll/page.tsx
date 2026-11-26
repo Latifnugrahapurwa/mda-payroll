@@ -8,8 +8,8 @@ import { Field, NumberInput, SectionTitle, SelectInput, TextInput } from "@/comp
 import { SlipCard } from "@/components/SlipCard";
 import { Toast, type ToastKind } from "@/components/Toast";
 import { usePayrollStore } from "@/lib/storage";
-import { calculatePayroll, currentPeriod, formatPeriod, makePayrollRecord, safeFilePart } from "@/lib/payroll";
-import { EMPTY_PAYROLL_INPUT, type PayrollInput } from "@/lib/types";
+import { afkCountToHours, afkHoursToCount, calculatePayroll, currentPeriod, formatPeriod, makePayrollRecord, safeFilePart } from "@/lib/payroll";
+import { createDefaultPaymentRule, EMPTY_PAYROLL_INPUT, type GlobalSettings, type PayrollInput } from "@/lib/types";
 import { WorkbookTransfer } from "@/components/WorkbookTransfer";
 import type { ImportMode, PayrollWorkbookData } from "@/lib/xlsx-backup";
 
@@ -24,6 +24,7 @@ export default function PayrollPage() {
   const [period, setPeriod] = useState(currentPeriod());
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [form, setForm] = useState<PayrollInput>(EMPTY_PAYROLL_INPUT);
+  const [useAssignedRule, setUseAssignedRule] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [exporting, setExporting] = useState<"png" | "pdf" | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -31,8 +32,28 @@ export default function PayrollPage() {
   const employees = useMemo(() => [...state.employees].sort((a, b) => a.name.localeCompare(b.name)), [state.employees]);
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId) ?? null;
   const existingRecord = state.payrolls.find((record) => record.period === period && record.employeeId === selectedEmployeeId);
-  const calculations = useMemo(() => calculatePayroll(form, state.settings), [form, state.settings]);
-  const previewRecord = useMemo(() => selectedEmployee ? makePayrollRecord(selectedEmployee, period, form, state.settings) : null, [selectedEmployee, period, form, state.settings]);
+  const selectedRule = state.paymentRules.find((rule) => rule.id === selectedEmployee?.paymentRuleId) ?? state.paymentRules[0] ?? createDefaultPaymentRule(state.settings);
+  const effectiveRule = existingRecord?.paymentRuleSnapshot && !useAssignedRule
+    ? existingRecord.paymentRuleSnapshot
+    : selectedRule;
+  const hasRuleChanges = !!existingRecord && JSON.stringify(existingRecord.paymentRuleSnapshot) !== JSON.stringify(selectedRule);
+  const effectiveSettings: GlobalSettings = {
+    standardMonthlyHours: effectiveRule.standardMonthlyHours,
+    monthlyTransportAllowanceBase: effectiveRule.monthlyTransportAllowanceBase,
+    monthlyMealAllowanceBase: effectiveRule.monthlyMealAllowanceBase,
+    mdaFeesPercentage: effectiveRule.mdaFeesPercentage,
+  };
+  const calculations = useMemo(() => calculatePayroll(form, effectiveSettings), [
+    form,
+    effectiveSettings.standardMonthlyHours,
+    effectiveSettings.monthlyTransportAllowanceBase,
+    effectiveSettings.monthlyMealAllowanceBase,
+    effectiveSettings.mdaFeesPercentage,
+  ]);
+  const previewRecord = useMemo(
+    () => selectedEmployee ? makePayrollRecord(selectedEmployee, period, form, effectiveSettings, effectiveRule) : null,
+    [selectedEmployee, period, form, effectiveSettings.standardMonthlyHours, effectiveSettings.monthlyTransportAllowanceBase, effectiveSettings.monthlyMealAllowanceBase, effectiveSettings.mdaFeesPercentage, effectiveRule],
+  );
   const periodRecords = state.payrolls.filter((record) => record.period === period);
   const lastExport = state.lastExportedAt[period];
   const needsBackup = periodRecords.length > 0 && (!lastExport || periodRecords.some((record) => new Date(record.updatedAt).getTime() > new Date(lastExport).getTime()));
@@ -43,18 +64,22 @@ export default function PayrollPage() {
   }, [employees, selectedEmployeeId]);
 
   useEffect(() => {
+    setUseAssignedRule(false);
+  }, [selectedEmployeeId, period]);
+
+  useEffect(() => {
     if (!selectedEmployee) {
       setForm(EMPTY_PAYROLL_INPUT);
       return;
     }
     const saved = state.payrolls.find((record) => record.period === period && record.employeeId === selectedEmployee.id);
     if (saved) {
-      const { id: _id, employeeId: _employeeId, employeeSnapshot: _snapshot, period: _period, updatedAt: _updatedAt, totalPaidHours: _hours, basedPayoutAmount: _based, transportAllowance: _transport, mealAllowance: _meal, subTotal: _sub, mdaFees: _fees, totalToBePaid: _total, ...input } = saved;
+      const { id: _id, employeeId: _employeeId, employeeSnapshot: _snapshot, paymentRuleSnapshot: _ruleSnapshot, period: _period, updatedAt: _updatedAt, totalPaidHours: _hours, basedPayoutAmount: _based, transportAllowance: _transport, mealAllowance: _meal, subTotal: _sub, mdaFees: _fees, totalToBePaid: _total, ...input } = saved;
       setForm(input);
     } else {
-      setForm({ ...EMPTY_PAYROLL_INPUT, salaryPerHour: selectedEmployee.salaryPerHour, positionalPayoutAmount: selectedEmployee.positionalPayoutDefault });
+      setForm({ ...EMPTY_PAYROLL_INPUT, salaryPerHour: selectedEmployee.salaryPerHour, positionalPayoutAmount: selectedEmployee.positionalPayoutDefault, workHours: selectedRule.defaultWorkHours, compensationHours: selectedRule.defaultCompensationHours, rstHours: selectedRule.defaultRstHours });
     }
-  }, [selectedEmployeeId, period, state.payrolls, state.employees]);
+  }, [selectedEmployeeId, period, state.payrolls, state.employees, state.paymentRules, selectedRule.id]);
 
   function notify(message: string, kind: ToastKind = "success") {
     setNotice({ message, kind });
@@ -62,6 +87,38 @@ export default function PayrollPage() {
 
   function update<K extends keyof PayrollInput>(key: K, value: PayrollInput[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateAfkCount(value: number) {
+    setForm((current) => ({
+      ...current,
+      afkCount: value,
+      ...(current.afkAutoEnabled ? { afkHours: afkCountToHours(value) } : {}),
+    }));
+  }
+
+  function updateAfkHours(value: number) {
+    setForm((current) => ({
+      ...current,
+      afkHours: value,
+      ...(current.afkAutoEnabled ? { afkCount: afkHoursToCount(value) } : {}),
+    }));
+  }
+
+  function toggleAfkAuto() {
+    setForm((current) => {
+      const enabled = !current.afkAutoEnabled;
+      const useHoursAsSource = current.afkCount === 0 && current.afkHours > 0;
+      return {
+        ...current,
+        afkAutoEnabled: enabled,
+        ...(enabled
+          ? useHoursAsSource
+            ? { afkCount: afkHoursToCount(current.afkHours) }
+            : { afkHours: afkCountToHours(current.afkCount) }
+          : {}),
+      };
+    });
   }
 
   function navigateEmployee(direction: number) {
@@ -128,7 +185,7 @@ export default function PayrollPage() {
   }
 
   function importWorkbook(data: PayrollWorkbookData, mode: ImportMode, records: PayrollWorkbookData["records"]) {
-    importMaster(data.employees, data.settings, mode === "replace");
+    importMaster(data.employees, data.settings, data.paymentRules, mode === "replace");
     replacePeriodPayrolls(data.period, records);
     markExported(data.period);
     setPeriod(data.period);
@@ -158,6 +215,7 @@ export default function PayrollPage() {
         period={period}
         employees={state.employees}
         settings={state.settings}
+        paymentRules={state.paymentRules}
         records={periodRecords}
         onImport={importWorkbook}
         onExported={() => markExported(period)}
@@ -195,13 +253,37 @@ export default function PayrollPage() {
                 <NumericField label="Sick Leave" value={form.sickLeave} onChange={(value) => update("sickLeave", value)} />
                 <NumericField label="Absence" value={form.absence} onChange={(value) => update("absence", value)} />
                 <NumericField label="Leave Permitted" value={form.leavePermitted} onChange={(value) => update("leavePermitted", value)} />
-                <NumericField label="AFK Count" value={form.afkCount} onChange={(value) => update("afkCount", value)} />
-                <NumericField label="AFK Hours" value={form.afkHours} onChange={(value) => update("afkHours", value)} />
+                <div className="col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 lg:col-span-3">
+                  <div>
+                    <p className="text-[14px] font-extrabold text-slate-900">AFK Auto Calculation</p>
+                    <p className="mt-1 text-[13px] text-slate-600">1 AFK Count = 10 menit · 6 AFK Count = 1 AFK Hour. Saat diaktifkan, nilai yang sudah diisi diselaraskan; jika keduanya terisi, Count menjadi acuan. Setelah itu kedua kolom saling memperbarui.</p>
+                  </div>
+                  <button type="button" onClick={toggleAfkAuto} aria-pressed={form.afkAutoEnabled} className={`min-h-[44px] rounded-xl px-5 py-2.5 text-[13px] font-extrabold transition ${form.afkAutoEnabled ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}>
+                    {form.afkAutoEnabled ? "Otomatis Aktif" : "Aktifkan Otomatis"}
+                  </button>
+                </div>
+                <NumericField label="AFK Count" value={form.afkCount} onChange={updateAfkCount} hint={form.afkAutoEnabled ? "Mengubah Count akan menghitung AFK Hours." : undefined} />
+                <NumericField label="AFK Hours" value={form.afkHours} onChange={updateAfkHours} hint={form.afkAutoEnabled ? "Mengubah Hours akan menghitung AFK Count." : undefined} />
               </div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-soft sm:p-7">
-              <SectionTitle>Payment Rules</SectionTitle>
+              <SectionTitle aside={<span className="rounded-full bg-violet-50 px-3 py-1.5 text-[12px] font-extrabold text-violet-800">{effectiveRule.name}</span>}>Payment Rules</SectionTitle>
+              <p className="mb-4 text-[13px] leading-relaxed text-slate-600">Profil diambil dari pengaturan master karyawan. Nilai awal jam kerja dapat disesuaikan untuk periode ini.</p>
+              {hasRuleChanges && !useAssignedRule && (
+                <div className="mb-4 flex flex-col justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center">
+                  <p className="text-[13px] leading-relaxed text-amber-900">Slip tersimpan masih memakai snapshot Payment Rules sebelumnya. Profil karyawan sudah berubah.</p>
+                  <button type="button" onClick={() => {
+                    setUseAssignedRule(true);
+                    setForm((current) => ({
+                      ...current,
+                      workHours: selectedRule.defaultWorkHours,
+                      compensationHours: selectedRule.defaultCompensationHours,
+                      rstHours: selectedRule.defaultRstHours,
+                    }));
+                  }} className="min-h-[42px] shrink-0 rounded-lg bg-amber-700 px-4 py-2 text-[13px] font-extrabold text-white hover:bg-amber-800">Terapkan Rules Terbaru</button>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-5">
                 <NumericField label="Work Hours" value={form.workHours} onChange={(value) => update("workHours", value)} />
                 <NumericField label="Compensation Hours" value={form.compensationHours} onChange={(value) => update("compensationHours", value)} />
@@ -230,12 +312,12 @@ export default function PayrollPage() {
                 <NumericField label="Loan Installment (Rp)" value={form.loanInstallment} onChange={(value) => update("loanInstallment", value)} />
                 <div><NumericField label="MDA Fees (Rp)" value={form.mdaFeesOverride ?? calculations.mdaFees} onChange={(value) => update("mdaFeesOverride", value)} /><button onClick={() => update("mdaFeesOverride", null)} className="mt-2 text-[13px] font-bold text-sky-700 transition hover:text-sky-900">Gunakan otomatis</button></div>
               </div>
-              <p className="mt-5 text-[14px] text-slate-600">Tarif MDA saat ini: <b>{state.settings.mdaFeesPercentage}%</b> dari Sub Total.</p>
+              <p className="mt-5 text-[14px] text-slate-600">Tarif MDA pada profil ini: <b>{effectiveSettings.mdaFeesPercentage}%</b> dari Sub Total.</p>
             </div>
 
             <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft sm:flex-row sm:p-6">
               <button onClick={save} className="inline-flex min-h-[54px] flex-1 items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3 text-[15px] font-extrabold text-white transition hover:bg-slate-800"><Save size={20} /> Simpan Slip</button>
-              <button onClick={() => { if (selectedEmployee) setForm({ ...EMPTY_PAYROLL_INPUT, salaryPerHour: selectedEmployee.salaryPerHour, positionalPayoutAmount: selectedEmployee.positionalPayoutDefault }); }} className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-[15px] font-bold text-slate-700 transition hover:bg-slate-50"><RotateCcw size={18} /> Reset Form</button>
+              <button onClick={() => { if (selectedEmployee) setForm({ ...EMPTY_PAYROLL_INPUT, salaryPerHour: selectedEmployee.salaryPerHour, positionalPayoutAmount: selectedEmployee.positionalPayoutDefault, workHours: selectedRule.defaultWorkHours, compensationHours: selectedRule.defaultCompensationHours, rstHours: selectedRule.defaultRstHours }); }} className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-[15px] font-bold text-slate-700 transition hover:bg-slate-50"><RotateCcw size={18} /> Reset Form</button>
             </div>
           </section>
 

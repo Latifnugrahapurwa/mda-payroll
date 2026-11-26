@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Copy, Pencil, Plus, Search, Trash2, X } from "lucide-react";
-import { Field, NumberInput, TextInput } from "@/components/Field";
+import { Field, NumberInput, SelectInput, TextInput } from "@/components/Field";
 import { Toast, type ToastKind } from "@/components/Toast";
 import { usePayrollStore } from "@/lib/storage";
 import type { Employee } from "@/lib/types";
@@ -12,7 +12,7 @@ import type { ImportMode, PayrollWorkbookData } from "@/lib/xlsx-backup";
 
 const blankEmployee = (): Employee => ({
   id: crypto.randomUUID(), eic: "", name: "", position: "", salaryPerHour: 0,
-  positionalPayoutDefault: 0, bankName: "BNI", bankAccountNumber: "", telegramChatId: "",
+  positionalPayoutDefault: 0, paymentRuleId: "default", bankName: "BNI", bankAccountNumber: "", telegramChatId: "",
 });
 
 type Notice = { message: string; kind: ToastKind };
@@ -26,12 +26,12 @@ export default function EmployeesPage() {
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const filtered = useMemo(
-    () => state.employees.filter((employee) => `${employee.eic} ${employee.name} ${employee.position}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)),
-    [state.employees, search],
+    () => state.employees.filter((employee) => `${employee.eic} ${employee.name} ${employee.position} ${state.paymentRules.find((rule) => rule.id === employee.paymentRuleId)?.name ?? ""}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)),
+    [state.employees, state.paymentRules, search],
   );
 
   function openNew() {
-    setEditing(blankEmployee());
+    setEditing({ ...blankEmployee(), paymentRuleId: state.paymentRules[0]?.id ?? "default" });
     setModalOpen(true);
   }
 
@@ -45,6 +45,10 @@ export default function EmployeesPage() {
       setNotice({ message: "EIC sudah digunakan karyawan lain. Periksa kembali kode karyawan.", kind: "error" });
       return;
     }
+    if (!state.paymentRules.some((rule) => rule.id === editing.paymentRuleId)) {
+      setNotice({ message: "Pilih Payment Rules yang valid untuk karyawan ini.", kind: "error" });
+      return;
+    }
     setEmployees(state.employees.some((employee) => employee.id === editing.id)
       ? state.employees.map((employee) => employee.id === editing.id ? editing : employee)
       : [...state.employees, editing]);
@@ -54,7 +58,7 @@ export default function EmployeesPage() {
   }
 
   function importWorkbook(data: PayrollWorkbookData, mode: ImportMode, records: PayrollWorkbookData["records"]) {
-    importMaster(data.employees, data.settings, mode === "replace");
+    importMaster(data.employees, data.settings, data.paymentRules, mode === "replace");
     replacePeriodPayrolls(data.period, records);
     markExported(data.period);
   }
@@ -104,15 +108,16 @@ export default function EmployeesPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left">
+            <table className="w-full min-w-[1120px] text-left">
               <thead className="bg-slate-50 text-[12px] font-extrabold uppercase tracking-[.1em] text-slate-500">
-                <tr><th className="px-6 py-4">Karyawan</th><th className="px-6 py-4">Tarif / Jam</th><th className="px-6 py-4">Rekening BNI</th><th className="px-6 py-4">Telegram</th><th className="px-6 py-4 text-right">Aksi</th></tr>
+                <tr><th className="px-6 py-4">Karyawan</th><th className="px-6 py-4">Tarif / Jam</th><th className="px-6 py-4">Payment Rules</th><th className="px-6 py-4">Rekening BNI</th><th className="px-6 py-4">Telegram</th><th className="px-6 py-4 text-right">Aksi</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[15px]">
                 {filtered.map((employee) => (
                   <tr key={employee.id} className="transition hover:bg-slate-50/80">
                     <td className="px-6 py-5"><p className="font-extrabold text-slate-900">{employee.name}</p><p className="mt-1 text-[13px] text-slate-500">{employee.eic || "Tanpa EIC"} <span className="mx-1 text-slate-300">·</span> {employee.position}</p></td>
                     <td className="px-6 py-5 font-bold tabular-nums text-slate-800">Rp {employee.salaryPerHour.toLocaleString("en-US")}</td>
+                    <td className="px-6 py-5"><span className="inline-flex rounded-full bg-violet-50 px-3 py-1.5 text-[12px] font-extrabold text-violet-800">{state.paymentRules.find((rule) => rule.id === employee.paymentRuleId)?.name ?? "Belum diatur"}</span></td>
                     <td className="px-6 py-5"><div className="flex items-center gap-2"><span className="text-[14px] text-slate-700">{employee.bankName} · {employee.bankAccountNumber || "-"}</span>{employee.bankAccountNumber && <button title="Salin rekening" aria-label={`Salin rekening ${employee.name}`} onClick={() => copyAccount(employee.bankAccountNumber)} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"><Copy size={17} /></button>}</div></td>
                     <td className="px-6 py-5">{employee.telegramChatId
                       ? <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1.5 text-[12px] font-extrabold text-emerald-800">Terhubung</span>
@@ -123,7 +128,7 @@ export default function EmployeesPage() {
                     </div></td>
                   </tr>
                 ))}
-                {filtered.length === 0 && <tr><td colSpan={5} className="px-6 py-16 text-center text-[15px] text-slate-500">{search ? "Tidak ada karyawan yang cocok dengan pencarian." : "Belum ada data karyawan. Tambahkan karyawan pertama Anda."}</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan={6} className="px-6 py-16 text-center text-[15px] text-slate-500">{search ? "Tidak ada karyawan yang cocok dengan pencarian." : "Belum ada data karyawan. Tambahkan karyawan pertama Anda."}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -136,6 +141,7 @@ export default function EmployeesPage() {
             period={currentPeriod()}
             employees={state.employees}
             settings={state.settings}
+            paymentRules={state.paymentRules}
             records={state.payrolls.filter((record) => record.period === currentPeriod())}
             onImport={importWorkbook}
             onExported={() => markExported(currentPeriod())}
@@ -154,6 +160,11 @@ export default function EmployeesPage() {
               <Field label="Jabatan *"><TextInput value={editing.position} onChange={(event) => setEditing({ ...editing, position: event.target.value })} placeholder="Editor (Senior)" /></Field>
               <Field label="Tarif Gaji per Jam (Rp)"><NumberInput value={editing.salaryPerHour} onValueChange={(value) => setEditing({ ...editing, salaryPerHour: value })} /></Field>
               <Field label="Tunjangan Jabatan Default (Rp)"><NumberInput value={editing.positionalPayoutDefault} onValueChange={(value) => setEditing({ ...editing, positionalPayoutDefault: value })} /></Field>
+              <Field label="Payment Rules" hint="Aturan ini otomatis digunakan saat membuat slip karyawan.">
+                <SelectInput value={editing.paymentRuleId || state.paymentRules[0]?.id || ""} onChange={(event) => setEditing({ ...editing, paymentRuleId: event.target.value })}>
+                  {state.paymentRules.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}
+                </SelectInput>
+              </Field>
               <Field label="Bank"><TextInput value={editing.bankName} onChange={(event) => setEditing({ ...editing, bankName: event.target.value })} /></Field>
               <Field label="Nomor Rekening (Internal)"><TextInput value={editing.bankAccountNumber} onChange={(event) => setEditing({ ...editing, bankAccountNumber: event.target.value })} placeholder="Nomor rekening BNI" /></Field>
               <Field label="Telegram Chat ID"><TextInput value={editing.telegramChatId} onChange={(event) => setEditing({ ...editing, telegramChatId: event.target.value })} placeholder="Contoh: 123456789" /></Field>

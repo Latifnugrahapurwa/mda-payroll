@@ -1,4 +1,5 @@
-import type { Employee, GlobalSettings, PayrollRecord } from "./types";
+import type { Employee, GlobalSettings, PaymentRule, PayrollRecord } from "./types";
+import { createDefaultPaymentRule } from "./types";
 import { calculatePayroll } from "./payroll";
 
 export type PayrollWorkbookData = {
@@ -6,6 +7,7 @@ export type PayrollWorkbookData = {
   exportedAt: string;
   employees: Employee[];
   settings: GlobalSettings;
+  paymentRules: PaymentRule[];
   records: PayrollRecord[];
 };
 
@@ -97,6 +99,8 @@ function employeeColumns(): Column[] {
     { key: "bankName", header: "Bank", width: 12 },
     { key: "bankAccountNumber", header: "Nomor Rekening (Internal)", width: 24 },
     { key: "telegramChatId", header: "Telegram Chat ID", width: 20 },
+    { key: "paymentRuleId", header: "Payment Rule ID (Internal)", width: 38, hidden: true },
+    { key: "paymentRuleName", header: "Payment Rules", width: 24 },
   ];
 }
 
@@ -114,6 +118,8 @@ function payrollColumns(): Column[] {
     { key: "leavePermitted", header: "Leave Permitted", width: 16, numFmt: NUMBER_FORMAT },
     { key: "afkCount", header: "AFK Count", width: 12, numFmt: NUMBER_FORMAT },
     { key: "afkHours", header: "AFK Hours", width: 13, numFmt: NUMBER_FORMAT },
+    { key: "afkAutoEnabled", header: "AFK Auto Calculation", width: 20 },
+    { key: "paymentRuleSnapshotJson", header: "Payment Rule Snapshot (Internal)", width: 42, hidden: true },
     { key: "salaryPerHour", header: "Salary per Hour (Rp)", width: 19, numFmt: CURRENCY_FORMAT },
     { key: "workHours", header: "Work Hours", width: 13, numFmt: NUMBER_FORMAT },
     { key: "compensationHours", header: "Compensation Hours", width: 19, numFmt: NUMBER_FORMAT },
@@ -153,10 +159,10 @@ export async function exportPayrollWorkbook(data: PayrollWorkbookData) {
     { key: "value", header: "Nilai", width: 42 },
   ], [
     { key: "format", label: "Format File", value: "MDA-PAYROLL-XLSX" },
-    { key: "schemaVersion", label: "Schema Version", value: 1 },
+    { key: "schemaVersion", label: "Schema Version", value: 2 },
     { key: "period", label: "Periode Payroll", value: data.period },
     { key: "exportedAt", label: "Diekspor Pada", value: data.exportedAt },
-    { key: "contents", label: "Isi File", value: "Master karyawan, pengaturan global, ringkasan dan detail payroll periode terpilih." },
+    { key: "contents", label: "Isi File", value: "Master karyawan, pengaturan global, Payment Rules, ringkasan dan detail payroll periode terpilih." },
     { key: "importRule", label: "Aturan Import", value: "Master dapat digabung atau ditimpa. Payroll untuk periode di file akan diganti; periode lain tetap dipertahankan." },
     { key: "security", label: "Data Sensitif", value: "File ini dapat memuat rekening bank dan Telegram Chat ID. Simpan di lokasi privat." },
   ]);
@@ -185,7 +191,23 @@ export async function exportPayrollWorkbook(data: PayrollWorkbookData) {
     cell.border = { top: { style: "medium", color: { argb: "FF86EFAC" } } };
   });
 
-  addTableSheet(workbook, "Master Karyawan", "MASTER DATA KARYAWAN", "Seluruh data karyawan. Nomor rekening dan Telegram Chat ID merupakan informasi internal bendahara.", employeeColumns(), data.employees.map((employee) => ({ ...employee })));
+  addTableSheet(workbook, "Master Karyawan", "MASTER DATA KARYAWAN", "Seluruh data karyawan. Nomor rekening dan Telegram Chat ID merupakan informasi internal bendahara.", employeeColumns(), data.employees.map((employee) => ({
+    ...employee,
+    paymentRuleName: data.paymentRules.find((rule) => rule.id === employee.paymentRuleId)?.name ?? "",
+  })));
+
+  addTableSheet(workbook, "Payment Rules", "PROFIL PAYMENT RULES", "Daftar profil aturan pembayaran yang dibuat pengguna. ID internal dipakai saat import.", [
+    { key: "id", header: "ID Internal", width: 38, hidden: true },
+    { key: "name", header: "Nama Payment Rules", width: 28 },
+    { key: "description", header: "Deskripsi", width: 38 },
+    { key: "standardMonthlyHours", header: "Standard Monthly Hours", width: 22, numFmt: NUMBER_FORMAT },
+    { key: "monthlyTransportAllowanceBase", header: "Transport Base (Rp)", width: 21, numFmt: CURRENCY_FORMAT },
+    { key: "monthlyMealAllowanceBase", header: "Meal Base (Rp)", width: 19, numFmt: CURRENCY_FORMAT },
+    { key: "mdaFeesPercentage", header: "MDA Fees (%)", width: 16, numFmt: "0.00" },
+    { key: "defaultWorkHours", header: "Default Work Hours", width: 19, numFmt: NUMBER_FORMAT },
+    { key: "defaultCompensationHours", header: "Default Compensation Hours", width: 25, numFmt: NUMBER_FORMAT },
+    { key: "defaultRstHours", header: "Default RST Hours", width: 18, numFmt: NUMBER_FORMAT },
+  ], data.paymentRules.map((rule) => ({ ...rule })));
 
   addTableSheet(workbook, "Pengaturan Global", "PENGATURAN GLOBAL", "Parameter tarif yang menjadi dasar kalkulasi payroll.", [
     { key: "key", header: "Key", width: 38, hidden: true },
@@ -201,6 +223,8 @@ export async function exportPayrollWorkbook(data: PayrollWorkbookData) {
 
   const payrollRows = data.records.map((record) => ({
     ...record,
+    afkAutoEnabled: record.afkAutoEnabled ? "Ya" : "Tidak",
+    paymentRuleSnapshotJson: JSON.stringify(record.paymentRuleSnapshot),
     eic: record.employeeSnapshot.eic,
     name: record.employeeSnapshot.name,
     position: record.employeeSnapshot.position,
@@ -219,11 +243,12 @@ export async function exportPayrollWorkbook(data: PayrollWorkbookData) {
     { key: "leavePermitted", header: "Leave Permitted", width: 17, numFmt: NUMBER_FORMAT },
     { key: "afkCount", header: "AFK Count", width: 13, numFmt: NUMBER_FORMAT },
     { key: "afkHours", header: "AFK Hours", width: 13, numFmt: NUMBER_FORMAT },
+    { key: "afkAutoLabel", header: "AFK Auto Calculation", width: 20 },
     { key: "workHours", header: "Work Hours", width: 14, numFmt: NUMBER_FORMAT },
     { key: "compensationHours", header: "Compensation Hours", width: 20, numFmt: NUMBER_FORMAT },
     { key: "rstHours", header: "RST Hours", width: 14, numFmt: NUMBER_FORMAT },
     { key: "totalPaidHours", header: "Total Paid Hours", width: 17, numFmt: NUMBER_FORMAT },
-  ], data.records.map((record) => ({ ...record, ...record.employeeSnapshot })));
+  ], data.records.map((record) => ({ ...record, afkAutoLabel: record.afkAutoEnabled ? "Ya" : "Tidak", ...record.employeeSnapshot })));
 
   addTableSheet(workbook, "Detail Pembayaran", `DETAIL PEMBAYARAN · ${data.period}`, "Rincian pendapatan, tunjangan, bonus, potongan dan nilai transfer. Rekening hanya untuk kebutuhan internal.", [
     { key: "eic", header: "EIC", width: 16 },
@@ -307,7 +332,29 @@ function requireText(row: Record<string, unknown>, key: string, label: string) {
   return value;
 }
 
-function parseEmployees(sheet: import("exceljs").Worksheet): Employee[] {
+function parsePaymentRules(sheet: import("exceljs").Worksheet): PaymentRule[] {
+  const rules = readSheetRows(sheet).map((row, index): PaymentRule => ({
+    id: requireText(row, "ID Internal", `ID Payment Rules baris ${index + 5}`),
+    name: requireText(row, "Nama Payment Rules", `Nama Payment Rules baris ${index + 5}`),
+    description: textValue(row.Deskripsi),
+    standardMonthlyHours: numberValue(row["Standard Monthly Hours"], "Standard Monthly Hours"),
+    monthlyTransportAllowanceBase: numberValue(row["Transport Base (Rp)"], "Transport Base (Rp)"),
+    monthlyMealAllowanceBase: numberValue(row["Meal Base (Rp)"], "Meal Base (Rp)"),
+    mdaFeesPercentage: numberValue(row["MDA Fees (%)"], "MDA Fees (%)"),
+    defaultWorkHours: numberValue(row["Default Work Hours"], "Default Work Hours"),
+    defaultCompensationHours: numberValue(row["Default Compensation Hours"], "Default Compensation Hours"),
+    defaultRstHours: numberValue(row["Default RST Hours"], "Default RST Hours"),
+  }));
+  if (!rules.length) throw new Error("Workbook harus memiliki minimal satu Payment Rules.");
+  if (new Set(rules.map((rule) => rule.id)).size !== rules.length) throw new Error("Terdapat ID Payment Rules duplikat.");
+  if (new Set(rules.map((rule) => rule.name.trim().toLowerCase())).size !== rules.length) throw new Error("Nama Payment Rules tidak boleh duplikat.");
+  if (rules.some((rule) => rule.standardMonthlyHours <= 0 || rule.monthlyTransportAllowanceBase < 0 || rule.monthlyMealAllowanceBase < 0 || rule.mdaFeesPercentage < 0 || rule.defaultWorkHours < 0 || rule.defaultCompensationHours < 0 || rule.defaultRstHours < 0)) {
+    throw new Error("Terdapat nilai Payment Rules yang tidak valid atau negatif.");
+  }
+  return rules;
+}
+
+function parseEmployees(sheet: import("exceljs").Worksheet, rules: PaymentRule[]): Employee[] {
   const employees = readSheetRows(sheet).map((row, index) => {
     const employee: Employee = {
       id: requireText(row, "ID Internal", `ID internal karyawan baris ${index + 5}`),
@@ -319,6 +366,7 @@ function parseEmployees(sheet: import("exceljs").Worksheet): Employee[] {
       bankName: textValue(row.Bank) || "BNI",
       bankAccountNumber: textValue(row["Nomor Rekening (Internal)"]),
       telegramChatId: textValue(row["Telegram Chat ID"]),
+      paymentRuleId: rules.find((rule) => rule.name.trim().toLowerCase() === textValue(row["Payment Rules"]).toLowerCase())?.id || textValue(row["Payment Rule ID (Internal)"]) || rules[0]?.id || "default",
     };
     if (employee.salaryPerHour < 0 || employee.positionalPayoutDefault < 0) throw new Error(`Tarif atau tunjangan karyawan ${employee.name} tidak boleh negatif.`);
     return employee;
@@ -342,7 +390,7 @@ function parseSettings(sheet: import("exceljs").Worksheet): GlobalSettings {
   return settings;
 }
 
-function parsePayroll(sheet: import("exceljs").Worksheet, period: string, settings: GlobalSettings): PayrollRecord[] {
+function parsePayroll(sheet: import("exceljs").Worksheet, period: string, settings: GlobalSettings, rules: PaymentRule[], employees: Employee[]): PayrollRecord[] {
   const records = readSheetRows(sheet).map((row, index) => {
     const rowPeriod = requireText(row, "Periode", `Periode payroll baris ${index + 5}`);
     if (rowPeriod !== period) throw new Error(`Periode pada baris payroll ${index + 5} tidak sama dengan periode file (${period}).`);
@@ -360,6 +408,7 @@ function parsePayroll(sheet: import("exceljs").Worksheet, period: string, settin
       leavePermitted: numberValue(row["Leave Permitted"], "Leave Permitted"),
       afkCount: numberValue(row["AFK Count"], "AFK Count"),
       afkHours: numberValue(row["AFK Hours"], "AFK Hours"),
+      afkAutoEnabled: textValue(row["AFK Auto Calculation"]).toLowerCase() === "ya" || textValue(row["AFK Auto Calculation"]).toLowerCase() === "true",
       salaryPerHour: numberValue(row["Salary per Hour (Rp)"], "Salary per Hour (Rp)"),
       workHours: numberValue(row["Work Hours"], "Work Hours"),
       compensationHours: numberValue(row["Compensation Hours"], "Compensation Hours"),
@@ -373,12 +422,42 @@ function parsePayroll(sheet: import("exceljs").Worksheet, period: string, settin
       loanInstallment: numberValue(row["Loan Installment (Rp)"], "Loan Installment (Rp)"),
       mdaFeesOverride: nullableNumber(row["MDA Fees Override (Rp)"], "MDA Fees Override (Rp)"),
     };
+    const employeeId = requireText(row, "Employee ID Internal", `Employee ID baris ${index + 5}`);
+    const linkedEmployee = employees.find((employee) => employee.id === employeeId);
+    const fallbackRule = rules.find((rule) => rule.id === linkedEmployee?.paymentRuleId) ?? rules[0] ?? createDefaultPaymentRule(settings);
+    let paymentRuleSnapshot = fallbackRule;
+    const snapshotJson = textValue(row["Payment Rule Snapshot (Internal)"]);
+    if (snapshotJson) {
+      try {
+        const parsed = JSON.parse(snapshotJson) as PaymentRule;
+        const numericValues = [
+          parsed?.standardMonthlyHours,
+          parsed?.monthlyTransportAllowanceBase,
+          parsed?.monthlyMealAllowanceBase,
+          parsed?.mdaFeesPercentage,
+          parsed?.defaultWorkHours,
+          parsed?.defaultCompensationHours,
+          parsed?.defaultRstHours,
+        ];
+        if (!parsed || typeof parsed.id !== "string" || typeof parsed.name !== "string" || numericValues.some((value) => !Number.isFinite(value)) || parsed.standardMonthlyHours <= 0 || numericValues.slice(1).some((value) => Number(value) < 0)) throw new Error();
+        paymentRuleSnapshot = parsed;
+      } catch {
+        throw new Error(`Payment Rule Snapshot pada payroll baris ${index + 5} tidak valid.`);
+      }
+    }
+    const calculationSettings: GlobalSettings = {
+      standardMonthlyHours: paymentRuleSnapshot.standardMonthlyHours,
+      monthlyTransportAllowanceBase: paymentRuleSnapshot.monthlyTransportAllowanceBase,
+      monthlyMealAllowanceBase: paymentRuleSnapshot.monthlyMealAllowanceBase,
+      mdaFeesPercentage: paymentRuleSnapshot.mdaFeesPercentage,
+    };
     return {
       ...input,
-      ...calculatePayroll(input, settings),
+      ...calculatePayroll(input, calculationSettings),
       id: requireText(row, "Record ID", `Record ID baris ${index + 5}`),
-      employeeId: requireText(row, "Employee ID Internal", `Employee ID baris ${index + 5}`),
+      employeeId,
       employeeSnapshot: snapshot,
+      paymentRuleSnapshot,
       period,
       updatedAt: textValue(row["Updated At"]) || new Date().toISOString(),
     };
@@ -405,19 +484,34 @@ export async function importPayrollWorkbook(file: File): Promise<PayrollWorkbook
   const attendanceSheet = workbook.getWorksheet("Detail Kehadiran");
   const paymentSheet = workbook.getWorksheet("Detail Pembayaran");
   if (!guide || !summarySheet || !employeeSheet || !settingsSheet || !payrollSheet || !attendanceSheet || !paymentSheet) {
-    throw new Error("Workbook tidak lengkap. Gunakan file ekspor MDA Payroll yang berisi ketujuh sheet standar.");
+    throw new Error("Workbook tidak lengkap. Gunakan file ekspor MDA Payroll yang berisi sheet standar.");
   }
 
   const guideRows = readSheetRows(guide);
   const metadata = new Map(guideRows.map((row) => [textValue(row.Informasi), textValue(row.Nilai)]));
-  if (metadata.get("Format File") !== "MDA-PAYROLL-XLSX" || metadata.get("Schema Version") !== "1") throw new Error("Versi atau format workbook tidak dikenali.");
+  const schemaVersion = metadata.get("Schema Version");
+  if (metadata.get("Format File") !== "MDA-PAYROLL-XLSX" || !["1", "2"].includes(schemaVersion ?? "")) {
+    throw new Error("Versi atau format workbook tidak dikenali.");
+  }
   const period = metadata.get("Periode Payroll") ?? "";
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new Error("Periode pada workbook tidak valid.");
 
-  const employees = parseEmployees(employeeSheet);
   const settings = parseSettings(settingsSheet);
-  const records = parsePayroll(payrollSheet, period, settings);
-  return { period, exportedAt: metadata.get("Diekspor Pada") || new Date().toISOString(), employees, settings, records };
+  const rulesSheet = workbook.getWorksheet("Payment Rules");
+  if (schemaVersion === "2" && !rulesSheet) throw new Error("Sheet Payment Rules tidak ditemukan pada workbook versi 2.");
+  const paymentRules = schemaVersion === "2" && rulesSheet
+    ? parsePaymentRules(rulesSheet)
+    : [createDefaultPaymentRule(settings)];
+  const employees = parseEmployees(employeeSheet, paymentRules);
+  const records = parsePayroll(payrollSheet, period, settings, paymentRules, employees);
+  return {
+    period,
+    exportedAt: metadata.get("Diekspor Pada") || new Date().toISOString(),
+    employees,
+    settings,
+    paymentRules,
+    records,
+  };
 }
 
 export function remapImportedPayrollRecords(

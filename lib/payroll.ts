@@ -1,4 +1,12 @@
-import type { Employee, GlobalSettings, PayrollComputed, PayrollInput, PayrollRecord } from "./types";
+import type { Employee, GlobalSettings, PaymentRule, PayrollComputed, PayrollInput, PayrollRecord } from "./types";
+
+export function afkCountToHours(count: number): number {
+  return Number((count / 6).toFixed(4));
+}
+
+export function afkHoursToCount(hours: number): number {
+  return Number((hours * 6).toFixed(4));
+}
 
 export function calculatePayroll(input: PayrollInput, settings: GlobalSettings): PayrollComputed {
   const totalPaidHours = input.workHours + input.compensationHours + input.rstHours - input.afkHours;
@@ -13,12 +21,13 @@ export function calculatePayroll(input: PayrollInput, settings: GlobalSettings):
   return { totalPaidHours, basedPayoutAmount, transportAllowance, mealAllowance, subTotal, mdaFees, totalToBePaid };
 }
 
-export function makePayrollRecord(employee: Employee, period: string, input: PayrollInput, settings: GlobalSettings): PayrollRecord {
+export function makePayrollRecord(employee: Employee, period: string, input: PayrollInput, settings: GlobalSettings, paymentRule: PaymentRule): PayrollRecord {
   return {
     ...input,
     ...calculatePayroll(input, settings),
     id: `${period}_${employee.id}`,
     employeeId: employee.id,
+    paymentRuleSnapshot: { ...paymentRule },
     employeeSnapshot: {
       eic: employee.eic,
       name: employee.name,
